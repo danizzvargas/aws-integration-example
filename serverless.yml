@@ -1,0 +1,90 @@
+service: integration-example
+
+provider:
+  name: aws
+  runtime: python3.7
+  role: arn:aws:iam::${self:custom.config.aws-account}:role/lambda-role
+  stage: ${opt:stage, 'dev'}
+  deploymentBucket:
+    name: danizz-serverless-dev
+
+custom:
+  config:
+    aws-account: ${file(aws_account)}
+    lambda-integration-prefix:
+      Fn::Join:
+        - ''
+        - - 'arn:'
+          - Ref: AWS::Partition
+          - ':apigateway:'
+          - Ref: AWS::Region
+          - ':lambda:path/2015-03-31/functions/'
+    lambda-permission-prefix:
+      Fn::Join:
+        - ''
+        - - 'arn:'
+          - Ref: AWS::Partition
+          - ':execute-api:'
+          - Ref: AWS::Region
+          - ':'
+          - Ref: AWS::AccountId
+          - ':'
+
+functions:
+  Hello:
+    handler: handler.hello
+
+resources:
+  Resources:
+
+    HelloRestApi:
+      Type: AWS::ApiGateway::RestApi
+      Properties:
+        Name: ${self:service}-${self:provider.stage}
+        EndpointConfiguration:
+          Types:
+            - EDGE
+
+    HelloResource:
+      Type: AWS::ApiGateway::Resource
+      Properties:
+        RestApiId:
+          Ref: HelloRestApi
+        ParentId:
+          Fn::GetAtt: [ HelloRestApi, RootResourceId ]
+        PathPart: hello
+
+    HelloMethod:
+      Type: AWS::ApiGateway::Method
+      Properties:
+        HttpMethod: GET
+        ResourceId:
+          Ref: HelloResource
+        RestApiId:
+          Ref: HelloRestApi
+        AuthorizationType: NONE
+        Integration:
+          IntegrationHttpMethod: POST
+          Type: AWS_PROXY
+          Uri:
+            Fn::Join:
+              - ''
+              - - ${self:custom.config.lambda-integration-prefix}
+                - Fn::GetAtt: [ HelloLambdaFunction, Arn ]
+                - /invocations
+
+    HelloPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName:
+          Fn::GetAtt: [ HelloLambdaFunction, Arn ]
+        Action: lambda:InvokeFunction
+        Principal: apigateway.amazonaws.com
+        SourceArn:
+          Fn::Join:
+            - ''
+            - - ${self:custom.config.lambda-permission-prefix}
+              - Ref: HelloRestApi
+              - /*/*
+
+    # AWS::ApiGateway::Deployment
